@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Subway Surfers Clone with Animation</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+  <style>
+    body { margin:0; background: #87ceeb; }
+    #gameDiv { margin: auto; display: block; }
+  </style>
+</head>
+<body>
+
+<div id="gameDiv"></div>
+
+<script>
+class StartScene extends Phaser.Scene {
+  constructor() {
+    super('StartScene');
+  }
+
+  create() {
+    this.add.text(240, 150, 'Subway Surfers Clone', { font: '36px Arial', fill: '#000' }).setOrigin(0.5);
+    const startButton = this.add.text(240, 300, 'Start Game', { font: '28px Arial', fill: '#0077ff' }).setOrigin(0.5).setInteractive();
+
+    startButton.on('pointerdown', () => {
+      this.scene.start('GameScene');
+    });
+  }
+}
+
+class GameScene extends Phaser.Scene {
+  constructor() {
+    super('GameScene');
+    this.lanesX = [120, 240, 360];
+    this.currentLane = 1;
+    this.score = 0;
+    this.distance = 0;
+    this.speed = 300;
+    this.lastObstacle = 0;
+    this.lastCoin = 0;
+    this.collectedCoins = 0;
+    this.startX = null;
+  }
+
+  preload() {
+    // الأصوات
+    this.load.audio('jumpSound', 'https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg');
+    this.load.audio('coinSound', 'https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg');
+    this.load.audio('hitSound', 'https://actions.google.com/sounds/v1/cartoon/metal_thud_and_wobble.ogg');
+
+    // الصور
+    // spritesheet للشخصية (مثال مجاني بسيط)
+    this.load.spritesheet('player', 'https://i.imgur.com/7TQf0KO.png', { frameWidth: 72, frameHeight: 97 });
+
+    this.load.image('coin', 'https://i.imgur.com/1c9QY9r.png');
+    this.load.image('obstacle', 'https://i.imgur.com/ZZqP9sM.png');
+  }
+
+  create() {
+    // الخلفية والأرض
+    this.add.rectangle(240, 400, 480, 800, 0x87ceeb);
+    const ground = this.add.rectangle(240, 760, 480, 80, 0x444444);
+    this.physics.add.existing(ground, true);
+
+    // اللاعب sprite مع أنيميشن
+    this.player = this.physics.add.sprite(this.lanesX[this.currentLane], 700, 'player');
+    this.player.setScale(0.6);
+    this.player.setCollideWorldBounds(true);
+    this.physics.add.collider(this.player, ground);
+
+    // إنشاء أنيميشن الجري
+    this.anims.create({
+      key: 'run',
+      frames: this.anims.generateFrameNumbers('player', { start: 0, end: 9 }),
+      frameRate: 15,
+      repeat: -1
+    });
+
+    // أنيميشن القفز (نفس صورة ثابتة على سبيل المثال)
+    this.anims.create({
+      key: 'jump',
+      frames: [{ key: 'player', frame: 10 }],
+      frameRate: 10
+    });
+
+    this.player.play('run');
+
+    // مجموعات العقبات والعملات
+    this.obstacles = this.physics.add.group();
+    this.coins = this.physics.add.group();
+
+    this.physics.add.overlap(this.player, this.obstacles, this.hitObstacle, null, this);
+    this.physics.add.overlap(this.player, this.coins, this.collectCoin, null, this);
+
+    // تحكم الكيبورد
+    this.cursors = this.input.keyboard.createCursorKeys();
+
+    // تحكم اللمس: سحب يمين ويسار لتغيير المسار، نقرة للقفز
+    this.input.on('pointerdown', pointer => {
+      this.startX = pointer.x;
+    });
+    this.input.on('pointerup', pointer => {
+      if (this.startX === null) return;
+      const dx = pointer.x - this.startX;
+      if (Math.abs(dx) > 30) {
+        if (dx < 0) this.changeLane(-1);
+        else this.changeLane(1);
+      } else {
+        if (this.player.body.onFloor()) {
+          this.player.body.setVelocityY(-600);
+          this.jumpSound.play();
+          this.player.play('jump');
+        }
+      }
+      this.startX = null;
+    });
+
+    this.jumpSound = this.sound.add('jumpSound');
+    this.coinSound = this.sound.add('coinSound');
+    this.hitSound = this.sound.add('hitSound');
+
+    this.scoreText = this.add.text(10, 10, 'Score: 0', { font: '24px Arial', fill: '#000' });
+    this.coinsText = this.add.text(10, 40, 'Coins: 0', { font: '24px Arial', fill: '#000' });
+  }
+
+  update(time, delta) {
+    const dt = delta / 1000;
+
+    this.speed += dt * 2;
+    this.distance += this.speed * dt;
+
+    this.score = Math.floor(this.distance / 10) + this.collectedCoins * 10;
+    this.scoreText.setText('Score: ' + this.score);
+    this.coinsText.setText('Coins: ' + this.collectedCoins);
+
+    if (time > this.lastObstacle + Phaser.Math.Between(600, 1200)) {
+      this.spawnObstacle();
+      this.lastObstacle = time;
+    }
+
+    if (time > this.lastCoin + Phaser.Math.Between(400, 1000)) {
+      this.spawnCoin();
+      this.lastCoin = time;
+    }
+
+    this.obstacles.children.iterate(obstacle => {
+      obstacle.y += this.speed * dt;
+      if (obstacle.y > 900) obstacle.destroy();
+    });
+
+    this.coins.children.iterate(coin => {
+      coin.y += this.speed * dt;
+      if (coin.y > 900) coin.destroy();
+    });
+
+    // حركة اللاعب سلسة بين المسارات
+    this.player.x = Phaser.Math.Linear(this.player.x, this.lanesX[this.currentLane], 0.2);
+
+    // إذا على الأرض يشغل أنيميشن الجري، وإذا في الجو أنيميشن القفز
+    if (this.player.body.onFloor()) {
+      if (this.player.anims.currentAnim.key !== 'run') {
+        this.player.play('run');
+      }
+    }
+
+    // تحكم الكيبورد
+    if (Phaser.Input.Keyboard.JustDown(this.cursors.left)) this.changeLane(-1);
+    if (Phaser.Input.Keyboard.JustDown(this.cursors.right)) this.changeLane(1);
+    if (Phaser.Input.Keyboard.JustDown(this.cursors.up)) {
+      if (this.player.body.onFloor()) {
+        this.player.body.setVelocityY(-600);
+        this.jumpSound.play();
+        this.player.play('jump');
+      }
+    }
+  }
+
+  changeLane(delta) {
+    this.currentLane = Phaser.Math.Clamp(this.currentLane + delta, 0, this.lanesX.length - 1);
+  }
+
+  spawnObstacle() {
+    const lane = Phaser.Math.Between(0, 2);
+    const x = this.lanesX[lane];
+    const obstacle = this.physics.add.sprite(x, -50, 'obstacle');
+    obstacle.setScale(0.6);
+    obstacle.body.setImmovable(true);
+    this.obstacles.add(obstacle);
+  }
+
+  spawnCoin() {
+    const lane = Phaser.Math.Between(0, 2);
+    const x = this.lanesX[lane];
+    const coin = this.physics.add.sprite(x, -50, 'coin');
+    coin.setScale(0.4);
+    coin.body.setImmovable(true);
+    this.coins.add(coin);
+  }
+
+  collectCoin(player, coin) {
+    coin.destroy();
+    this.collectedCoins++;
+    this.coinSound.play();
+  }
+
+  hitObstacle() {
+    this.hitSound.play();
+    this.physics.pause();
+    this.scene.start('GameOverScene', { score: this.score, coins: this.collectedCoins });
+  }
+}
+
+class GameOverScene extends Phaser.Scene {
+  constructor() {
+    super('GameOverScene');
+  }
+
+  init(data) {
+    this.score = data.score || 0;
+    this.coins = data.coins || 0;
+  }
+
+  create() {
+    const savedHighScore = localStorage.getItem('highScore') || 0;
+    const highScore = Math.max(this.score, savedHighScore);
+    localStorage.setItem('highScore', highScore);
+
+    this.add.text(240, 200, 'Game Over', { font: '48px Arial', fill: '#ff0000' }).setOrigin(0.5);
+    this.add.text(240, 280, `Score: ${this.score}`, { font: '32px Arial', fill: '#000' }).setOrigin(0.5);
+    this.add.text(240, 330, `Coins: ${this.coins}`, { font: '32px Arial', fill: '#000' }).setOrigin(0.5);
+    this.add.text(240, 380, `High Score: ${highScore}`, { font: '32px Arial', fill: '#000' }).setOrigin(0.5);
+
+    const replayButton = this.add.text(240, 470, 'Play Again', { font: '28px Arial', fill: '#0077ff' }).setOrigin(0.5).setInteractive();
+
+    replayButton.on('pointerdown', () => {
+      this.scene.start('StartScene');
+    });
+  }
+}
+
+const config = {
+  type: Phaser.AUTO,
+  width: 480,
+  height: 800,
+  backgroundColor: '#87ceeb',
+  parent: 'gameDiv',
+  physics: { default: 'arcade', arcade: { gravity: { y: 1200 }, debug: false } },
+  scene: [StartScene, GameScene, GameOverScene]
+};
+
+const game = new Phaser.Game(config);
+</script>
+
+</body>
+</html>
